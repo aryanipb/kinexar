@@ -1,0 +1,121 @@
+Scope
+  I read every file in the current directory TRAINING/: __init__.py, minimal_dataset.py:1,
+  minimal_loss.py:1, and train.py:1. The directory has 496 lines total. I also read the directly required
+  model/eval/preprocessing paths to correctly explain the training math: MODEL, EVALUATION, and
+  PREPROCESSING/transform.py.
+
+  Directory Meaning
+  TRAINING/ is the optimization layer for KINEXAR: a GPU-oriented CVAE trajectory forecasting trainer
+  over preprocessed Argoverse-style tensor shards. It does not define the model architecture itself; it
+  instantiates TrajectoryModel from MODEL.model, loads sharded data, computes a winner-take-all CVAE
+  loss, performs mixed-precision AdamW optimization, logs minADE-style metrics, and saves robust
+  checkpoints.
+
+  Data Pipeline
+  Training samples are loaded from DATA/train by minimal_dataset.py:5. It prefers manifest.pt, otherwise
+  scans shard_*.pt. Each item contains feat, history_mask, agent_mask, map_feat, map_mask, future, and
+  anchor.
+
+  Batch collation pads variable agent/map counts into fixed tensors: feat: [B,A,50,5], history_mask:
+  [B,A,50], map_feat: [B,M,6], future: [B,60,2], anchor: [B,3]. Inputs are stored as float16; masks are
+  boolean.
+
+  The coordinate system is local, ego/focal-relative, heading-aligned, and scaled by 50 m. From /home/
+  aryan/work/startup/KINEXAR/NEURIPS/PREPROCESSING/transform.py:4:
+
+  R(-theta) = [[cos(theta),  sin(theta)],
+               [-sin(theta), cos(theta)]]
+
+  p_local = R(-theta) (p_abs - anchor_xy) / 50
+  v_local = R(-theta) v_abs / 50
+  heading_local = heading_abs - theta
+  p_abs = 50 * p_local + anchor_xy
+
+  Model During Training
+  train.py:60 creates:
+
+  TrajectoryModel(din=5, dim=128, lat=128, future_steps=60,
+                  use_residual_refinement=True,
+                  refinement_lambda=0.35)
+
+  The model is a graph/context encoder plus CVAE latent module plus six-expert structured kinematic
+  decoder. Training mode uses posterior latents q(z|x,y); eval mode uses learned prior latents p(z|x)
+  with deterministic seed 0.
+
+  The six default kinematic experts are cv, ca, ctra, jerk, jerk_beta, and jerk_turn. They produce six
+  trajectory hypotheses, so the loss and metrics are K=6 multimodal objectives.
+
+  Core Equations
+  Winner-take-all reconstruction loss from minimal_loss.py:12:
+
+  e_{b,k,t} = y_hat_{b,k,t} - y_{b,t}
+  MSE_{b,k} = mean_t ||e_{b,k,t}||_2^2
+  k*_b = argmin_k MSE_{b,k}
+  L_rec = 0.1 * mean_b MSE_{b,k*_b}
+
+  Gaussian KL from posterior to learned prior:
+
+  KL(q||p)_d = 0.5 * [logvar_p - logvar_q - 1
+                    + exp(logvar_q - logvar_p)
+                    + (mu_q - mu_p)^2 / (exp(logvar_p) + 1e-6)]
+  raw_KL = mean_b sum_d KL_{b,d}
+  effective_KL = mean_b sum_d max(KL_{b,d}, 0.02)
+
+  Total optimized loss from train.py:177:
+
+  beta(step) = 1e-4,                         step < 200
+  beta(step) = min(1, (step - 200) / 2800),  step >= 200
+
+  L_total = L_rec + beta(step) * effective_KL
+
+  Latent sampling:
+
+  z = mu + exp(0.5 * logvar) * epsilon,  epsilon ~ N(0,I)
+
+  Kinematic expert examples:
+
+  CV:   p(t) = p0 + (v0 + 4*tanh(raw)) * t
+  CA:   p(t) = p0 + v0*t + 0.5*a*t^2,        a = 2*tanh(raw)
+  Jerk: s(t) = v*t + 0.5*a0*t^2 + (1/6)*j*t^3, j = 1.5*tanh(raw)
+
+  Residual refinement, enabled in training:
+
+  y_final = y_physics + lambda * r(theta, y_physics, z),  lambda = 0.35
+
+  Optimization Protocol
+  The optimizer is AdamW(model.parameters(), lr=1e-4) by default, with PyTorch default betas/eps/weight
+  decay. Training uses CUDA AMP via autocast and GradScaler, gradient clipping at norm 1.0, and post-step
+  parameter clamping to [-20, 20]. There is no LR scheduler and no explicit random seed in TRAINING/
+  train.py.
+
+  Default run from pixi.toml is:
+
+  PYTHONPATH=. python TRAINING/train.py --data-dir DATA/train --val-data-dir DATA/val --log-dir RESULTS
+  --ckpt-dir CHECKPOINTS --batch-size 16 --lr 1e-4 --epochs 12
+
+  Validation And Checkpointing
+  lastmodel.pt is saved every successful finite batch with model, optimizer, step, epoch, and best ADE
+  state. modelckpt.pt is saved only when the current batch absolute min6ADE improves. End-of-epoch
+  validation calls perform_eval.
+
+  Validation computes scaled local ADE/FDE, then multiplies by 50 to report meters:
+
+  FDE_k = ||y_hat_{k,T} - y_T||_2
+  ADE_k = mean_t ||y_hat_{k,t} - y_t||_2
+  minFDE = min_k FDE_k
+  avgMin6ADE = mean_b min_k ADE_{b,k} * 50
+
+  Important Caveats For A Paper
+  Do not claim true CPU compatibility: although DEVICE falls back to CPU, train.py and evaluate.py call
+  torch.cuda.synchronize() and related CUDA APIs unconditionally.
+
+  K)^2 before multiplying by 50, which is dimensionally questionable. I would not present it as an
+
+  Resume behavior may repeat the saved epoch because epoch is stored as the current epoch, not epoch + 1.
+
+  A concise paper phrasing would be: “We train KINEXAR as a conditional variational multi-hypothesis
+  trajectory model in a focal-agent local coordinate frame scaled by 50 m. For each scene, six structured
+  kinematic experts decode posterior CVAE samples into future trajectories. The objective uses winner-
+  take-all reconstruction over the six hypotheses plus a free-bits KL term between the posterior and a
+  learned scene prior, with linear KL warm-up after 200 optimizer steps. Optimization uses AdamW, CUDA
+  mixed precision, gradient clipping, and automatic full-validation checkpoints.”

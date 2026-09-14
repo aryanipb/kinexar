@@ -1,0 +1,66 @@
+Proposed Contribution
+
+We present a decoder-level reformulation for multimodal trajectory forecasting that replaces direct coordinate prediction with latent-conditioned kinematic generation followed by differentiable map-constrained refinement.
+
+Technical Formulation (clear and complete)
+
+Given observed context, we model trajectory generation as a structured process with three variables:
+
+Latent variable (Z): captures high-level behavioral uncertainty (e.g., intent, style)
+Kinematic parameters (E): define a motion generator (e.g., velocity, acceleration, turn rate)
+Trajectory (Y): produced via deterministic rollout
+
+The model operates in four stages:
+
+Latent inference: infer a distribution over latent variables conditioned on scene context
+Expert parameterization: map latent variables to parameters of a kinematic motion model
+Analytical rollout: generate trajectories using closed-form motion equations
+Map-constrained refinement: adjust trajectories via differentiable optimization over a map-derived distance field
+What is New (precise differentiation)
+Output space reparameterization
+The model predicts motion parameters instead of coordinates, shifting trajectory generation from unconstrained regression to structured dynamical synthesis.
+Functional role of latent variables
+Latent variables do not directly generate trajectories; they control the motion generator, introducing a structured and interpretable mechanism for multimodality.
+Deterministic kinematic rollout as the decoder
+Trajectories are obtained through analytical integration of motion equations, ensuring temporal consistency and bounded dynamics without requiring the network to learn these properties.
+Post-generation constraint enforcement via differentiable refinement
+We incorporate a map-based optimization layer that projects trajectories onto feasible regions using gradient-based updates, decoupling constraint satisfaction from the learned model.
+Why this formulation is justified
+
+Direct coordinate prediction entangles:
+
+intent
+dynamics
+uncertainty
+
+within a single mapping, which often results in:
+
+physically inconsistent trajectories
+unstable multimodal predictions
+degraded long-horizon behavior
+
+By explicitly factorizing:
+
+intent (latent)
+motion mechanism (kinematics)
+environmental constraints (map refinement)
+
+the proposed formulation introduces a structured inductive bias aligned with the underlying generative process of motion.
+
+Positioning relative to prior work
+Latent-variable models capture multimodality but typically generate trajectories directly.
+Motion-primitive and kinematic models impose structure but lack flexible latent conditioning.
+Map-aware models incorporate constraints but usually only as input features or loss terms.
+
+Our contribution is the integration of these components into a single, coherent generation pipeline, where:
+
+latent variables parameterize motion primitives
+trajectories are generated via physics-based rollout
+constraints are enforced through a differentiable optimization layer
+Scope and limitations (explicit)
+The expressivity of the model depends on the chosen set of kinematic experts
+The refinement step introduces additional computational cost
+Interaction modeling is handled at the latent inference stage and not explicitly in the rollout
+Concise Claim
+
+We introduce a structured generative decoder that produces trajectories via latent-conditioned kinematic motion and enforces feasibility through differentiable map-based refinement, improving physical consistency and interpretability without relying on direct coordinate regression.

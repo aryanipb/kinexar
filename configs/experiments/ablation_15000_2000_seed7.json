@@ -1,0 +1,61 @@
+{
+  "evaluation": {
+    "history_csv_filename": "history.csv",
+    "history_filename": "history.json",
+    "report_filename": "summary_report.json",
+    "val_metrics_filename": "validation_metrics.json",
+    "val_samples_filename": "validation_samples.csv",
+    "visualise_samples": 8
+  },
+  "ablation": {
+    "variant": "full_kinexar"
+  },
+  "experiment_name": "kinexar_neurips",
+  "map_dir": "data/maps",
+  "modal": {
+    "app_name": "kinexar-neurips-modal",
+    "cpu": 6,
+    "data_volume_name": "kinexar-data",
+    "gpu": "A10G",
+    "memory_mb": 10240,
+    "output_volume_name": "kinexar-neurips",
+    "remote_map_dir": "/data/maps",
+    "remote_output_root": "/outputs/neurips/ablation",
+    "remote_processed_root": "/data/controlled_generalisation_inputs/kinexar_ablation_15000_2000_seed7/full",
+    "timeout_seconds": 43200
+  },
+  "output_root": "outputs/neurips/ablation",
+  "pass_fail": {
+    "max_expert_usage_ratio": 0.9,
+    "max_final_offroad": 1.5,
+    "max_mean_offroad": 0.5,
+    "min_ade_rel_improvement": 0.05,
+    "min_expert_delta": 0.05
+  },
+  "processed_root": "data/neurips/ablation_15000_2000_seed7",
+  "run_name": "kinexar_ablation_15000_2000_seed7",
+  "seed": 7,
+  "subset": {
+    "debug_size": 32,
+    "seed": 7,
+    "train_size": 15000,
+    "val_scenario_disjoint": true,
+    "val_size": 2000
+  },
+  "train": {
+    "batch_size": 64,
+    "device": "cuda",
+    "early_stop_patience_epochs": 32,
+    "epochs": 32,
+    "grad_clip_norm": 1.0,
+    "learning_rate": 0.0007,
+    "log_every_steps": 10,
+    "log_train_metrics": true,
+    "num_workers": 6,
+    "save_every_epochs": 1,
+    "use_amp": true,
+    "vram_cap_gb": 40.0,
+    "vram_target_gb": 40.0,
+    "weight_decay": 0.0001
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "experiment_name": "controlled_generalisation",
+  "run_name": "baseline",
+  "processed_root": "data/processed/av2_full",
+  "map_dir": "data/maps",
+  "output_root": "outputs/controlled_generalisation",
+  "seed": 7,
+  "subset": {
+    "train_size": 1500,
+    "val_size": 500,
+    "debug_size": 32,
+    "seed": 7,
+    "val_scenario_disjoint": true
+  },
+  "train": {
+    "epochs": 15,
+    "batch_size": 64,
+    "learning_rate": 0.0007,
+    "weight_decay": 0.0001,
+    "num_workers": 0,
+    "use_amp": true,
+    "grad_clip_norm": 1.0,
+    "log_every_steps": 1,
+    "save_every_epochs": 1,
+    "early_stop_patience_epochs": 20,
+    "device": "cuda",
+    "vram_target_gb": 40.0,
+    "vram_cap_gb": 40.0
+  },
+  "evaluation": {
+    "visualise_samples": 8,
+    "report_filename": "summary_report.json",
+    "history_filename": "history.json",
+    "history_csv_filename": "history.csv",
+    "val_metrics_filename": "validation_metrics.json",
+    "val_samples_filename": "validation_samples.csv"
+  },
+  "pass_fail": {
+    "min_ade_rel_improvement": 0.05,
+    "min_expert_delta": 0.05,
+    "max_expert_usage_ratio": 0.9,
+    "max_mean_offroad": 0.5,
+    "max_final_offroad": 1.5
+  },
+  "modal": {
+    "app_name": "roadweaver-controlled-generalisation",
+    "data_volume_name": "roadweaver-data",
+    "output_volume_name": "roadweaver-controlled-generalisation",
+    "gpu": "A10G",
+    "cpu": 6,
+    "timeout_seconds": 43200,
+    "remote_processed_root": "/data/processed/av2_full",
+    "remote_map_dir": "/data/maps",
+    "remote_output_root": "/outputs/controlled_generalisation"
+  }
+}

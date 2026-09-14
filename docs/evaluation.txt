@@ -1,0 +1,105 @@
+Verified Scope
+
+  I read the full current EVALUATION/ package: 3 files, 325 lines. I also traced its required parent
+  dependencies in PREPROCESSING/, TRAINING/, and MODEL/, because evaluate.py is not self-contained.
+
+  Local artifact state right now: DATA/train exists with 91 shards, DATA/val does not exist, CHECKPOINTS/
+  is empty, and RESULTS/ is empty. So the code can be analyzed, but standalone validation cannot yet
+  produce real numbers in this workspace.
+
+  Project Identity
+
+  KINEXAR is a multimodal trajectory forecasting system for Argoverse 2 Motion Forecasting. The evaluated
+  object is a six-mode CVAE-style trajectory predictor with structured kinematic experts: constant
+  velocity, constant acceleration, acceleration-turn, jerk, jerk-beta, and jerk-turn. The evaluation path
+  is centered in evaluate.py:12.
+
+  Data Manifold
+
+  Raw trajectories are converted to a focal-agent local coordinate frame in /home/aryan/work/startup/
+  KINEXAR/NEURIPS/PREPROCESSING/transform.py:11. The anchor is the focal agent at history step 49: (a_x,
+  a_y, theta). Positions and velocities are translated, rotated, and divided by 50.
+
+  Core transform:
+
+  x' = ((x - a_x) cos(theta) + (y - a_y) sin(theta)) / 50
+  y' = (-(x - a_x) sin(theta) + (y - a_y) cos(theta)) / 50
+  h' = h - theta
+
+  The inverse used for visualization is:
+
+  x = 50 x' cos(theta) - 50 y' sin(theta) + a_x
+  y = 50 x' sin(theta) + 50 y' cos(theta) + a_y
+
+  Each processed sample contains feat [A,50,5], history_mask [A,50], agent_mask [A], map_feat [M,6],
+  map_mask [M], future [60,2], anchor [3], and scenario_id. A sampled shard confirms this contract.
+
+  Filtering
+
+  The triple sieve in /home/aryan/work/startup/KINEXAR/NEURIPS/PREPROCESSING/sieve.py:3 keeps map points
+  within 50 m, keeps agents ever within 50 m of the focal agent, adds the top-9 nearest agents at the
+  final history step, and always keeps the focal agent.
+
+  Model
+
+  TrajectoryModel in /home/aryan/work/startup/KINEXAR/NEURIPS/MODEL/trajectory_model_impl.py:22 builds a
+  GPU social graph, encodes agent/map context, samples CVAE latents, and decodes six expert futures. The
+  encoder mixes temporal Mamba-like recurrence, map attention, temporal edges, spatial edges, and cross-
+  time spatial edges in /home/aryan/work/startup/KINEXAR/NEURIPS/MODEL/spatial_temporal_encoder.py:140.
+
+  The structured decoder equations are in /home/aryan/work/startup/KINEXAR/NEURIPS/MODEL/CVAE/
+  moe_decoder.py:81. With dt=0.1, t=1..60, experts generate:
+
+  CV:        p(t) = p0 + (v0 + 4 tanh(r)) t
+  CA:        p(t) = p0 + v0 t + 0.5 a t^2,       a = 2 tanh(r)
+  CTRA:      s(t) = v0 t + 0.5 a t^2,             omega = 0.6 tanh(r)
+  Jerk:      s(t) = v0 t + 0.5 a0 t^2 + (1/6) j t^3, j = 1.5 tanh(r)
+  JerkBeta:  theta(t) = theta0 + omega0 t + 0.5 beta t^2
+  JerkTurn:  theta(t) = theta0 + omega t
+
+  The residual refiner applies:
+
+  y = y_coarse + lambda * W_r(sigmoid(W_g(d1(theta))) * d2(y_coarse) + d3(z))
+
+  with default lambda=0.35.
+
+  Training Objective
+
+  Training uses winner-take-all reconstruction plus KL in /home/aryan/work/startup/KINEXAR/NEURIPS/
+  TRAINING/minimal_loss.py:4:
+
+  MSE_k = mean_t ||y_k,t - g_t||_2^2
+  k* = argmin_k MSE_k
+  L_recon = 0.1 * mean_i MSE_i,k*
+  KL(q||p) = 0.5 * sum(logvar_p - logvar_q - 1 + exp(logvar_q-logvar_p) + (mu_q-mu_p)^2 / exp(logvar_p))
+  L = L_recon + beta * sum_j max(KL_j, 0.02)
+
+  beta=1e-4 before step 200, then linearly warms to 1.0 by step 3000.
+
+  Evaluation Metrics
+
+  The official evaluator computes distances in the local scaled frame, then multiplies by 50 to report
+  meters. For prediction y_i,k,t and target g_i,t:
+
+  d_i,k,t = ||y_i,k,t - g_i,t||_2
+  FDE_i,k = d_i,k,T
+  ADE_i,k = (1/T) sum_t d_i,k,t
+  kF_i = argmin_k FDE_i,k
+  avgMinFDE = (50/N) sum_i FDE_i,kF_i
+  avgMinADE = (50/N) sum_i ADE_i,kF_i
+  avgMin6ADE = (50/N) sum_i min_k ADE_i,k
+  actorMR = (1/N) sum_i 1[FDE_i,kF_i > 0.04]
+
+  0.04 in scaled units equals 2.0 m, so actorMR is a 2 m final-displacement miss rate.
+
+  Important Caveats
+
+  scaled space and then multiplies the whole sum by 50, adding about 34.72 m constant penalty. Report it
+
+  Visualization currently has two bugs: evaluate.py:160 uses np without importing NumPy, and map lookup
+  uses sample_XXXXX.json instead of real scenario_id, so maps will usually not draw.
+
+  torch.cuda.synchronize() is unconditional in evaluation, so CPU fallback is not actually safe.
+
+  Also, y_raw_abs is only local * 50 + anchor; it does not inverse-rotate by theta. The local-frame
+  metrics are valid, but absolute-coordinate logging should not be cited unless this is corrected.

@@ -1,0 +1,75 @@
+# ─── Environment & Package Managers ──────────────────────────────────────────
+.pixi/
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ─── Data & Datasets ─────────────────────────────────────────────────────────
+data/processed/
+data/maps/
+data/neurips/
+local_map_harvest/
+maps/
+
+# Large training manifests (>100MB, excluded from git)
+data/manifests/av2_manifest.json
+data/manifests/av2_manifest1.json
+
+# ─── Model Checkpoints & Training Artifacts ──────────────────────────────────
+checkpoints/
+outputs/
+logs/
+plots/
+backups/
+submission_artifacts/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+
+# ─── Numeric & Array Data ────────────────────────────────────────────────────
+*.npz
+*.npy
+*.parquet
+*.csv
+*.tar
+*.tar.gz
+*.zip
+
+# ─── Logs & Reports ──────────────────────────────────────────────────────────
+*.log
+full_logs.txt
+train_logs.txt
+finalval.log
+
+# ─── Database & Runtime ──────────────────────────────────────────────────────
+*.sqlite3
+*.pid
+*.db
+
+# ─── IDE & OS ────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ─── Pixi Lock (platform-specific, optional to commit) ───────────────────────
+# Uncomment to ignore: pixi.lock
+
+# ─── GCP Secrets & Credentials ───────────────────────────────────────────────
+credentials.json
+service_account*.json
+*.key

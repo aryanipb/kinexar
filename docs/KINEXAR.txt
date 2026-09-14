@@ -1,0 +1,169 @@
+Project Essence
+  KINEXAR is a multimodal trajectory forecasting model for Argoverse-style motion forecasting. It
+  predicts 6 future trajectory hypotheses for a focal agent over 60 steps at dt = 0.1s. The actual model
+  is best described as:
+
+  ego-normalized spatial-temporal graph encoder + map cross-attention + CVAE latent sampling + structured
+  kinematic expert decoder + optional neural residual refinement.
+
+  Data Manifold
+  Raw scenario tensors are transformed around the focal agent at history step 49. For anchor a = (ax, ay)
+  and focal heading theta:
+
+  R(theta) = [[cos(theta),  sin(theta)],
+              [-sin(theta), cos(theta)]]
+
+  x_local = R(theta) (x_world - a) / 50
+  v_local = R(theta) v_world / 50
+  heading_local = heading_world - theta
+
+  Future targets use the same rotated, focal-relative, 1/50 scaled frame. Map tokens are [x, y,
+  cos_heading, sin_heading, lane_type, is_intersection], also transformed into this frame. Agents are
+  kept if ever within 50m of the focal agent or among top-9 nearest at the final history step; the focal
+  agent is always retained.
+
+  Graph Construction
+  The model builds its interaction graph on GPU in /home/aryan/work/startup/KINEXAR/NEURIPS/
+  PREPROCESSING/graph_builder.py:152. Node index:
+
+  node_id(b, a, t) = b * A * T + a * T + t
+
+  Edges are:
+  temporal: same agent t -> t+1; spatial: top-k nearby agents at same timestep; cross: top-k nearby
+  agents from t -> t+1. In training config, radius is 1.0 in scaled coordinates, equal to 50m, with topk
+  = 9.
+
+  Encoder
+  The encoder in spatial_temporal_encoder.py:140 maps feat[B,A,50,5] to hidden nodes h[B,A,50,128].
+
+  Temporal mixing uses a Mamba-like selective recurrence:
+
+  u_t = W_u LN(x_t)
+  g_t = sigmoid(W_g LN(x_t))
+  b_t = softplus(W_b LN(x_t))
+  c_t = W_c LN(x_t)
+  a = softplus(a_param)
+  dec_t = exp(-b_t * a)
+  state_t = prod_{i<=t}(dec_i) * sum_{tau<=t} (b_tau * u_tau / prod_{i<=tau}(dec_i))
+  y_t = g_t * (c_t * state_t + d * u_t)
+
+  Geometry encoding uses normalized Gaussian radial basis plus angular harmonics:
+
+  r = sqrt(dx^2 + dy^2 + eps), phi = atan2(dy, dx)
+  GRBF_i = exp(-0.5 ((r-c_i)/sigma)^2) / sum_j exp(-0.5 ((r-c_j)/sigma)^2)
+  geo = MLP([GRBF, 0.25 cos(k phi), 0.25 sin(k phi)]_{k=1..4})
+
+  Map fusion encodes per-agent relative map tokens, performs multi-head attention from the final agent
+  hidden state to map tokens, then adds a gated map vector only at the final observed timestep.
+
+  The final encoder output is a learned convex mixture:
+
+  w = softmax(mix)
+  h_out = w0 h_temporal + w1 h_flow + w2 h_spatial + w3 h_cross
+
+  CVAE
+  The prior in CVAE/prior.py:5 predicts:
+
+  p(z | x) = N(mu_p(h_global, ctx_mean), diag(exp(logvar_p)))
+
+  The posterior in CVAE/encoder.py:39 encodes [context tokens ; future tokens] with Transformer blocks
+  plus local convolutional mixing:
+
+  q(z | x, y) = N(mu_q, diag(exp(logvar_q)))
+  z = mu + exp(0.5 logvar) * epsilon
+
+  During training, one latent sample is drawn per expert from the posterior. During evaluation, one
+  latent sample per expert is drawn from the prior with deterministic seed 0.
+
+  Structured Kinematic Expert Decoder
+  The main decoder is CVAE/moe_decoder.py:81. Default experts are:
+
+  cv, ca, ctra, jerk, jerk_beta, jerk_turn
+
+  Expert tokens are built as:
+
+  token_k = scene_proj(h_global) * (1 + 0.5 tanh(W_g z_k))
+            + W_z z_k + structured_latent(z_k) + expert_embedding_k
+
+  Transformer blocks decode expert-specific coefficient bases, then raw coefficients are produced and
+  divided by 50 before use. Let tau_n = n * 0.1.
+
+  Physics equations:
+
+  CV:
+  v_n = v0 + 4 tanh(r_n)
+  p_n = p0 + v_n tau_n
+
+  CA:
+  a_n = 2 tanh(r_n)
+  p_n = p0 + v0 tau_n + 0.5 a_n tau_n^2
+  v_n = v0 + a_n tau_n
+
+  CTRA:
+  a_n = 2 tanh(r_n[0]), omega_n = 0.6 tanh(r_n[1])
+  s_n = speed0 tau_n + 0.5 a_n tau_n^2
+  theta_eff = theta0 + 0.5 omega_n tau_n
+  p_n = p0 + s_n [cos(theta_eff), sin(theta_eff)]
+  theta_n = theta0 + omega_n tau_n
+
+  Jerk:
+  j_n = 1.5 tanh(r_n)
+  s_n = speed0 tau_n + 0.5 a0 tau_n^2 + (1/6) j_n tau_n^3
+  p_n = p0 + s_n [cos(theta0), sin(theta0)]
+
+  Jerk-Beta:
+  j_n = 1.5 tanh(r_n[0]), beta_n = tanh(r_n[1])
+  theta_eff = theta0 + 0.5 omega0 tau_n + (1/6) beta_n tau_n^2
+  theta_n = theta0 + omega0 tau_n + 0.5 beta_n tau_n^2
+  p_n = p0 + s_n [cos(theta_eff), sin(theta_eff)]
+
+  Jerk-Turn:
+  j_n = 1.5 tanh(r_n[0]), omega_n = omega0 + 0.6 tanh(r_n[1])
+  theta_eff = theta0 + 0.5 omega_n tau_n
+  theta_n = theta0 + omega_n tau_n
+  p_n = p0 + s_n [cos(theta_eff), sin(theta_eff)]
+
+  Optional residual refinement is enabled in training:
+
+  g = sigmoid(W_g d1(theta_raw))
+  r = W_r(g * d2(y_coarse) + d3(z))
+  y_final = y_coarse + lambda r,  lambda = 0.35 by default
+
+  Loss
+  Training uses winner-take-all reconstruction plus KL in /home/aryan/work/startup/KINEXAR/NEURIPS/
+  TRAINING/minimal_loss.py:4:
+
+  D_{b,k} = (1/T) sum_t || y_hat_{b,k,t} - y_{b,t} ||_2^2
+  k* = argmin_k D_{b,k}
+  L_recon = 0.1 * mean_b D_{b,k*}
+
+  KL(q||p) = 0.5 sum_i [logvar_p - logvar_q - 1
+            + exp(logvar_q - logvar_p)
+            + (mu_q - mu_p)^2 / (exp(logvar_p) + 1e-6)]
+
+  KL_eff = sum_i max(KL_i, 0.02)
+  beta(step) = 1e-4 for step < 200, else min(1, (step-200)/(3000-200))
+  L_total = L_recon + beta * KL_eff
+
+  Metrics
+  Evaluation compares predictions and targets in the normalized local frame, then multiplies distances by
+  50 to report meters:
+
+  ADE_k = mean_t || y_hat_k,t - y_t ||_2
+  FDE_k = || y_hat_k,T - y_T ||_2
+  avgMinFDE = mean_b min_k FDE_{b,k} * 50
+  avgMin6ADE = mean_b min_k ADE_{b,k} * 50
+  actorMR = mean_b [min_k FDE_{b,k} > 0.04]    # 0.04 scaled = 2m
+
+  Important paper-writing correction: keys like y_raw_abs/y_abs are misleading. The model does not
+  inverse-rotate predictions back to global coordinates in trajectory_decode.py; it only applies pred *
+  50 + anchor. True world-frame reconstruction requires the inverse rotation used in visualizer.py. For
+  ADE/FDE this is fine because rotation preserves Euclidean distances, but for qualitative world-
+  coordinate claims, describe the output as focal-frame predictions unless explicitly inverse-
+  transformed.
+
+  The exact trainable parameter count for the model used in training:
+
+  2,009,520 trainable parameters
+
+  THE CHECKPOINT SIZE OF MODEL IS 7-8 MB.

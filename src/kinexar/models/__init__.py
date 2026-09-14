@@ -1,0 +1,1 @@
+"""KINEXAR model components."""

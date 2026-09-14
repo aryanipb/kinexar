@@ -1,0 +1,12 @@
+.git
+.pixi
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+outputs
+data/neurips
+data/maps
+data/processed

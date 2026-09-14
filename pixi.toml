@@ -1,0 +1,29 @@
+[workspace]
+name = "kinexar"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.11.*"
+pyarrow = ">=18,<20"
+scipy = ">=1.14,<1.17"
+pillow = ">=10,<13"
+pyflakes = ">=3.4.0,<4"
+
+[pypi-dependencies]
+torch = ">=2.4"
+modal = ">=0.63.0"
+
+[tasks]
+dataproc = "PYTHONPATH=src python src/kinexar/PREPROCESSING/refinery.py"
+train = "PYTHONPATH=src python src/kinexar/TRAINING/train_engine.py"
+validate = "PYTHONPATH=src python src/kinexar/EVALUATION/minimal_eval.py"
+gcptrain = "PYTHONPATH=src python src/kinexar/SCRIPTS/train_gcp_l4.py"
+gcpvalidate = "PYTHONPATH=src python src/kinexar/SCRIPTS/validate_gcp_l4.py"
+check = "PYTHONPATH=src:. python -c \"import py_compile, glob; [py_compile.compile(f, doraise=True) for f in glob.glob('src/**/*.py', recursive=True) + glob.glob('scripts/*.py')]\""
+gcpupload = "PYTHONPATH=src:. python scripts/gcp_ops.py upload"
+gcpfull = "PYTHONPATH=src:. python scripts/gcp_ops.py full"
+gcpdockerimages = "PYTHONPATH=src:. python scripts/gcp_ops.py docker-images"
+valmapsupload = "PYTHONPATH=src:. python scripts/gcp_ops.py val-maps-upload"
+gcpdockerfull = "PYTHONPATH=src:. python scripts/gcp_ops.py docker-full"
+gcpdockervalidate = "PYTHONPATH=src:. python scripts/gcp_ops.py docker-validate"
